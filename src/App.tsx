@@ -27,14 +27,58 @@ import {
   Sliders,
 } from "lucide-react";
 
+// Helper to sanitize incoming fields and guarantee strictly unique field_id values across all pages
+function sanitizeFields(rawFields: any[]): BoundingBoxField[] {
+  if (!Array.isArray(rawFields)) return [];
+  const seenIds = new Map<string, number>();
+  return rawFields.map((f, idx) => {
+    const pageNum =
+      typeof f.page_number === "number" && f.page_number > 0
+        ? Math.floor(f.page_number)
+        : 1;
+    let baseId = (f.field_id || `field_${pageNum}_${idx + 1}`).toString().trim();
+    let count = (seenIds.get(baseId) || 0) + 1;
+    seenIds.set(baseId, count);
+    const uniqueId = count > 1 ? `${baseId}_p${pageNum}_${count}` : baseId;
+
+    let box =
+      Array.isArray(f.box_2d) && f.box_2d.length === 4
+        ? f.box_2d
+        : [0, 0, 100, 100];
+    let [ymin, xmin, ymax, xmax] = box.map((n: any) =>
+      Math.max(0, Math.min(1000, Number(n) || 0))
+    );
+    if (ymin >= ymax) ymax = Math.min(1000, ymin + 30);
+    if (xmin >= xmax) xmax = Math.min(1000, xmin + 80);
+
+    return {
+      field_id: uniqueId,
+      detected_label: f.detected_label || `Field ${idx + 1}`,
+      box_2d: [ymin, xmin, ymax, xmax] as [number, number, number, number],
+      mapped_value:
+        f.mapped_value !== undefined &&
+        f.mapped_value !== "null" &&
+        f.mapped_value !== ""
+          ? String(f.mapped_value)
+          : null,
+      confidence_score:
+        typeof f.confidence_score === "number" ? f.confidence_score : 0.98,
+      page_number: pageNum,
+      field_type: f.field_type,
+      font_size: f.font_size,
+      font_color: f.font_color,
+    };
+  });
+}
+
 export default function App() {
   const [documentPages, setDocumentPages] = useState<PageImageItem[]>([]);
   const [documentImageUrl, setDocumentImageUrl] = useState<string>("");
-  const [documentName, setDocumentName] = useState<string>("IRS Form W-9");
-  const [activePresetId, setActivePresetId] = useState<string | null>("form-w9");
+  const [documentName, setDocumentName] = useState<string>("");
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(2);
+  const [totalPages, setTotalPages] = useState<number>(0);
 
   const [currentPromptText, setCurrentPromptText] = useState<string>("");
   const [fields, setFields] = useState<BoundingBoxField[]>([]);
@@ -93,28 +137,6 @@ export default function App() {
     };
   }, []);
 
-  // Load initial preset or restore from localStorage on mount
-  useEffect(() => {
-    const defaultPreset = SAMPLE_PRESETS[0];
-    const page1Url = generateSampleDocumentDataUrl(defaultPreset.id, 1);
-    const page2Url = generateSampleDocumentDataUrl(defaultPreset.id, 2);
-    const initialPages: PageImageItem[] = [
-      { pageNumber: 1, dataUrl: page1Url },
-      { pageNumber: 2, dataUrl: page2Url },
-    ];
-
-    setDocumentPages(initialPages);
-    setDocumentImageUrl(page1Url);
-    setDocumentName(`${defaultPreset.name}.png`);
-    setCurrentPromptText(defaultPreset.sampleDetails);
-    setCurrentPage(1);
-    setTotalPages(2);
-    setUploadedFile(null);
-
-    // Run initial scan across 100% of pages
-    executeMapping(initialPages, defaultPreset.name, defaultPreset.sampleDetails, 2);
-  }, []);
-
   const handleDocumentLoaded = (
     pages: PageImageItem[],
     name: string,
@@ -122,14 +144,15 @@ export default function App() {
     numPages: number = 1,
     file?: File | null
   ) => {
-    const actualPages = pages.length > 0 ? pages : [{ pageNumber: 1, dataUrl: "" }];
-    setDocumentPages(actualPages);
-    setDocumentImageUrl(actualPages[0]?.dataUrl || "");
+    const validPages = pages.filter((p) => p.dataUrl);
+    if (validPages.length === 0) return;
+    setDocumentPages(validPages);
+    setDocumentImageUrl(validPages[0]?.dataUrl || "");
     setDocumentName(name);
     setErrorMessage(null);
     setSelectedFieldId(null);
     setCurrentPage(1);
-    setTotalPages(numPages || actualPages.length || 1);
+    setTotalPages(numPages || validPages.length || 1);
     setUploadedFile(file || null);
     setIsEditMode(false);
 
@@ -137,7 +160,7 @@ export default function App() {
     if (userText !== undefined) {
       setCurrentPromptText(userText);
     }
-    executeMapping(actualPages, name, promptToUse, numPages || actualPages.length);
+    executeMapping(validPages, name, promptToUse, numPages || validPages.length);
   };
 
   const handlePageChange = (newPage: number) => {
@@ -203,7 +226,10 @@ export default function App() {
     promptText: string = currentPromptText,
     numPages: number = totalPages
   ) => {
-    if (!pagesList || pagesList.length === 0) return;
+    if (!pagesList || pagesList.length === 0 || !pagesList[0]?.dataUrl) {
+      setErrorMessage("Please upload a PDF or document first to begin spatial mapping.");
+      return;
+    }
 
     const startTime = performance.now();
     setIsProcessing(true);
@@ -211,7 +237,7 @@ export default function App() {
 
     // If device is offline, execute client-side spatial engine directly
     if (!navigator.onLine) {
-      const localFields = generateClientSpatialMapping(docName, promptText, numPages || pagesList.length);
+      const localFields = sanitizeFields(generateClientSpatialMapping(docName, promptText, numPages || pagesList.length));
       const elapsed = Math.round(performance.now() - startTime);
       setFields(localFields);
       setProcessingTimeMs(elapsed);
@@ -276,22 +302,23 @@ export default function App() {
         };
       }
 
-      setFields(data.fields || []);
+      const sanitized = sanitizeFields(data.fields || []);
+      setFields(sanitized);
       setProcessingTimeMs(data.processing_time_ms || Math.round(performance.now() - startTime));
       if (data.model_used) {
         setModelUsed(data.model_used);
       }
       setFallbackNotice(data.fallback_notice || null);
 
-      if (data.fields && data.fields.length > 0) {
+      if (sanitized.length > 0) {
         const firstPageField =
-          data.fields.find((f: BoundingBoxField) => (f.page_number || 1) === currentPage) || data.fields[0];
+          sanitized.find((f: BoundingBoxField) => (f.page_number || 1) === currentPage) || sanitized[0];
         setSelectedFieldId(firstPageField.field_id);
       }
     } catch (err: any) {
       console.error("Mapping unexpected error:", err);
       // Fallback guarantees the app NEVER breaks
-      const recoveryFields = generateClientSpatialMapping(docName, promptText, numPages || pagesList.length);
+      const recoveryFields = sanitizeFields(generateClientSpatialMapping(docName, promptText, numPages || pagesList.length));
       setFields(recoveryFields);
       setModelUsed("Spatial Layout Engine (Self-Healing)");
       setFallbackNotice("Spatial Layout Engine automatically restored full multi-page coverage.");
@@ -317,7 +344,7 @@ export default function App() {
   );
 
   const handleAddNewField = useCallback((newField: BoundingBoxField) => {
-    setFields((prev) => [...prev, newField]);
+    setFields((prev) => sanitizeFields([...prev, newField]));
     setSelectedFieldId(newField.field_id);
   }, []);
 

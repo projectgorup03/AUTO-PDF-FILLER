@@ -25,6 +25,9 @@ import {
   Minus,
   Plus,
   Sliders,
+  UploadCloud,
+  FileUp,
+  FileText,
 } from "lucide-react";
 
 interface SpatialDocumentCanvasProps {
@@ -145,7 +148,15 @@ export const SpatialDocumentCanvas: React.FC<SpatialDocumentCanvasProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const dropzoneInputRef = useRef<HTMLInputElement>(null);
   const isAutoFittingRef = useRef<boolean>(false);
+
+  const handleDropzoneFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onFileDrop) {
+      onFileDrop(file);
+    }
+  };
 
   // Auto-fit helper: accurately scales and centers the entire uploaded PDF page/image within the preview frame without clipping
   const autoFitPage = useCallback((mode: "contain" | "width" | "height" = "contain") => {
@@ -503,9 +514,9 @@ export const SpatialDocumentCanvas: React.FC<SpatialDocumentCanvasProps> = ({
         {/* Left Section: Source info & Multi-Page Navigation & Edit Form Toggle */}
         <div className="flex items-center flex-wrap gap-2">
           <div className="bg-black/90 px-3 py-2 min-h-[44px] border border-[#00F5FF]/30 backdrop-blur-md rounded-sm flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#00F5FF] animate-pulse flex-shrink-0" />
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${documentImageUrl ? "bg-[#00F5FF] animate-pulse" : "bg-white/30"}`} />
             <span className="text-xs font-mono text-[#00F5FF] font-bold uppercase tracking-wider truncate max-w-[130px] sm:max-w-[200px]">
-              {documentName}
+              {documentImageUrl ? (documentName || "Document") : "No Document Loaded"}
             </span>
           </div>
 
@@ -518,11 +529,11 @@ export const SpatialDocumentCanvas: React.FC<SpatialDocumentCanvasProps> = ({
             <button
               id="prev-page-btn"
               onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-              disabled={currentPage <= 1}
-              aria-label={currentPage <= 1 ? "First Page Reached" : `Go to Previous Page (Page ${currentPage - 1})`}
-              title={currentPage <= 1 ? "First Page" : `Go to Page ${currentPage - 1}`}
+              disabled={!documentImageUrl || currentPage <= 1}
+              aria-label={!documentImageUrl ? "No document" : currentPage <= 1 ? "First Page Reached" : `Go to Previous Page (Page ${currentPage - 1})`}
+              title={!documentImageUrl ? "No document" : currentPage <= 1 ? "First Page" : `Go to Page ${currentPage - 1}`}
               className={`flex items-center justify-center gap-1.5 px-3 min-h-[44px] text-xs font-mono rounded-sm transition-all focus-visible:ring-2 focus-visible:ring-[#00F5FF] focus-visible:outline-none ${
-                currentPage <= 1
+                !documentImageUrl || currentPage <= 1
                   ? "text-white/20 cursor-not-allowed bg-transparent"
                   : "text-[#00F5FF] hover:bg-[#00F5FF]/20 hover:text-white cursor-pointer active:scale-95"
               }`}
@@ -536,19 +547,19 @@ export const SpatialDocumentCanvas: React.FC<SpatialDocumentCanvasProps> = ({
               aria-current="page"
               className="px-3 min-h-[44px] text-xs font-mono font-bold text-white bg-white/5 border-x border-white/10 tracking-widest uppercase flex items-center justify-center gap-1.5"
             >
-              <span className="text-[#00F5FF]">P.{currentPage}</span>
+              <span className="text-[#00F5FF]">P.{documentImageUrl ? currentPage : 0}</span>
               <span className="text-white/40">/</span>
-              <span>{Math.max(1, totalPages)}</span>
+              <span>{documentImageUrl ? Math.max(1, totalPages) : 0}</span>
             </div>
 
             <button
               id="next-page-btn"
               onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage >= totalPages}
-              aria-label={currentPage >= totalPages ? "Last Page Reached" : `Go to Next Page (Page ${currentPage + 1})`}
-              title={currentPage >= totalPages ? "Last Page" : `Go to Page ${currentPage + 1}`}
+              disabled={!documentImageUrl || currentPage >= totalPages}
+              aria-label={!documentImageUrl ? "No document" : currentPage >= totalPages ? "Last Page Reached" : `Go to Next Page (Page ${currentPage + 1})`}
+              title={!documentImageUrl ? "No document" : currentPage >= totalPages ? "Last Page" : `Go to Page ${currentPage + 1}`}
               className={`flex items-center justify-center gap-1.5 px-3 min-h-[44px] text-xs font-mono rounded-sm transition-all focus-visible:ring-2 focus-visible:ring-[#00F5FF] focus-visible:outline-none ${
-                currentPage >= totalPages
+                !documentImageUrl || currentPage >= totalPages
                   ? "text-white/20 cursor-not-allowed bg-transparent"
                   : "text-[#00F5FF] hover:bg-[#00F5FF]/20 hover:text-white cursor-pointer active:scale-95"
               }`}
@@ -966,7 +977,7 @@ export const SpatialDocumentCanvas: React.FC<SpatialDocumentCanvasProps> = ({
                 className="absolute inset-0 w-full h-full pointer-events-auto touch-none"
                 style={{ width: "100%", height: "100%" }}
               >
-                {pageFields.map((field) => {
+                {pageFields.map((field, idx) => {
                   const [ymin, xmin, ymax, xmax] = field.box_2d;
                   const isSelected = selectedFieldId === field.field_id;
                   const isHovered = hoveredFieldId === field.field_id;
@@ -1014,7 +1025,7 @@ export const SpatialDocumentCanvas: React.FC<SpatialDocumentCanvasProps> = ({
 
                   return (
                     <div
-                      key={field.field_id}
+                      key={`${field.field_id}_p${field.page_number || currentPage}_${idx}`}
                       id={`bbox-${field.field_id}`}
                       role="region"
                       aria-label={`Field region: ${field.detected_label || field.field_id}`}
@@ -1203,17 +1214,80 @@ export const SpatialDocumentCanvas: React.FC<SpatialDocumentCanvasProps> = ({
             )}
           </div>
         ) : (
-          <div className="text-center p-8 text-white/40 font-mono">
-            <Layers className="w-12 h-12 mx-auto mb-3 text-[#00F5FF]/50 animate-pulse" />
-            <p className="text-sm font-bold text-white uppercase tracking-wider">No document loaded</p>
-            <p className="text-xs text-white/30 mt-1">Upload a PDF or Image, or pick a preset from the toolbar above.</p>
+          <div
+            id="workspace-upload-dropzone"
+            onClick={() => dropzoneInputRef.current?.click()}
+            onDragOver={handleCanvasDragOver}
+            onDragLeave={handleCanvasDragLeave}
+            onDrop={handleCanvasDrop}
+            className="group relative z-10 w-full max-w-xl mx-auto p-8 sm:p-12 rounded-lg border-2 border-dashed border-[#00F5FF]/40 hover:border-[#00F5FF] bg-black/80 hover:bg-[#00F5FF]/[0.03] transition-all duration-200 cursor-pointer flex flex-col items-center justify-center text-center shadow-[0_0_50px_rgba(0,0,0,0.8)] backdrop-blur-md"
+            role="region"
+            aria-label="Upload PDF Document to Begin"
+          >
+            {/* Hidden Input triggered by dropzone click */}
+            <input
+              ref={dropzoneInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp"
+              onChange={handleDropzoneFileChange}
+              className="hidden"
+              id="dropzone-file-input"
+              aria-label="Upload PDF Document"
+            />
+
+            {/* Glowing Icon Orb */}
+            <div className="relative mb-5 flex items-center justify-center">
+              <div className="absolute inset-0 w-20 h-20 rounded-full bg-[#00F5FF]/10 group-hover:bg-[#00F5FF]/20 animate-pulse blur-md transition-all" />
+              <div className="relative w-16 h-16 rounded-full bg-black/90 border border-[#00F5FF]/50 group-hover:border-[#00F5FF] flex items-center justify-center shadow-[0_0_20px_rgba(0,245,255,0.25)] group-hover:scale-105 transition-transform duration-200">
+                <UploadCloud className="w-8 h-8 text-[#00F5FF] group-hover:text-white transition-colors" />
+              </div>
+            </div>
+
+            {/* Prominent Header */}
+            <h2 className="text-xl sm:text-2xl font-bold font-mono text-white tracking-wide uppercase mb-2 group-hover:text-[#00F5FF] transition-colors">
+              Upload PDF Document to Begin
+            </h2>
+
+            {/* Guidance Subtitle */}
+            <p className="text-xs sm:text-sm text-white/60 font-mono mb-6 max-w-md leading-relaxed">
+              Drag & drop your multi-page PDF document or form image here, or click to browse files from your device.
+            </p>
+
+            {/* Primary Action Button - 44px min touch target */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                dropzoneInputRef.current?.click();
+              }}
+              aria-label="Select and upload a PDF document"
+              className="flex items-center justify-center gap-2.5 px-6 min-h-[44px] rounded-sm bg-[#00F5FF] hover:bg-[#00F5FF]/90 text-black font-mono font-bold uppercase tracking-wider text-xs shadow-[0_0_20px_rgba(0,245,255,0.4)] hover:shadow-[0_0_28px_rgba(0,245,255,0.6)] active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+            >
+              <FileUp className="w-4 h-4 text-black stroke-[2.5]" />
+              <span>Select PDF Document</span>
+            </button>
+
+            {/* Badges: Supported Formats & Engine Capabilities */}
+            <div className="mt-8 pt-6 border-t border-white/10 w-full flex flex-wrap items-center justify-center gap-2 text-[10px] font-mono text-white/50">
+              <span className="px-2.5 py-1 rounded-sm bg-white/5 border border-white/10 text-white/70">
+                PDF (Multi-Page)
+              </span>
+              <span className="px-2.5 py-1 rounded-sm bg-white/5 border border-white/10 text-white/70">
+                PNG / JPEG
+              </span>
+              <span className="px-2.5 py-1 rounded-sm bg-[#00F5FF]/10 border border-[#00F5FF]/30 text-[#00F5FF] font-bold">
+                100% Page Layout Detection
+              </span>
+            </div>
           </div>
         )}
 
         {/* Floating Canvas Navigation / Edit Help */}
         <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/85 backdrop-blur px-3 py-1.5 rounded-sm border border-white/10 text-xs font-mono text-white/70 pointer-events-none">
           <Move className="w-3.5 h-3.5 text-[#00F5FF]" />
-          {isEditMode ? (
+          {!documentImageUrl ? (
+            <span>Upload a PDF document to begin spatial detection and coordinate mapping</span>
+          ) : isEditMode ? (
             <span>Edit Mode: Type in box • Touch/Drag to move • Drag bottom-right to resize • Use styling toolbar</span>
           ) : (
             <span>Locked Mode: Touch/Drag to pan • Pinch to zoom • Click "Edit Form" to type in-place & customize font/color</span>

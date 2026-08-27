@@ -17,7 +17,20 @@ export function generateClientSpatialMapping(
     allFields.push(...pageFields);
   }
 
-  return allFields;
+  // Deduplicate and ensure global uniqueness of field_id across multi-page document
+  const seen = new Map<string, number>();
+  return allFields.map((f, idx) => {
+    const p = f.page_number || 1;
+    let baseId = f.field_id || `field_p${p}_${idx + 1}`;
+    let count = (seen.get(baseId) || 0) + 1;
+    seen.set(baseId, count);
+    const uniqueId = count > 1 ? `${baseId}_p${p}_${count}` : baseId;
+    return {
+      ...f,
+      field_id: uniqueId,
+      page_number: p,
+    };
+  });
 }
 
 export function generateClientSpatialMappingForPage(

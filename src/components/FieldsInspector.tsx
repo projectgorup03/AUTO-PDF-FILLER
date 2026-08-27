@@ -220,14 +220,22 @@ export const FieldsInspector: React.FC<FieldsInspectorProps> = ({
         aria-label="Detected spatial fields list"
         className="flex-1 overflow-y-auto p-3 space-y-2.5 divide-y divide-white/5 font-mono"
       >
-        {filteredFields.length === 0 ? (
+        {fields.length === 0 ? (
+          <div className="text-center py-16 px-4 text-white/40 font-mono">
+            <FileText className="w-10 h-10 mx-auto mb-3 text-[#00F5FF]/40" />
+            <p className="text-xs font-bold uppercase text-white/80 tracking-wider">No Document Fields</p>
+            <p className="text-[11px] text-white/40 mt-1.5 max-w-xs mx-auto leading-relaxed">
+              Upload a PDF document to begin spatial bounding box scanning and form extraction.
+            </p>
+          </div>
+        ) : filteredFields.length === 0 ? (
           <div className="text-center py-12 text-white/40 font-mono">
             <SlidersHorizontal className="w-8 h-8 mx-auto mb-2 opacity-50 text-[#00F5FF]" />
             <p className="text-xs font-bold uppercase">No matching fields found</p>
             <p className="text-[10px] text-white/30 mt-0.5">Adjust filter or search keyword.</p>
           </div>
         ) : (
-          filteredFields.map((field) => {
+          filteredFields.map((field, index) => {
             const isSelected = selectedFieldId === field.field_id;
             const isHovered = hoveredFieldId === field.field_id;
             const isEditing = editingFieldId === field.field_id;
@@ -237,7 +245,7 @@ export const FieldsInspector: React.FC<FieldsInspectorProps> = ({
 
             return (
               <div
-                key={field.field_id}
+                key={`${field.field_id}_p${fieldPage}_${index}`}
                 id={`inspector-item-${field.field_id}`}
                 role="listitem"
                 tabIndex={0}

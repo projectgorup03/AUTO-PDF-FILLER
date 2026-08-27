@@ -164,21 +164,21 @@ async function startServer() {
           }
         }
 
-      // System Instruction text matching exact Google AI Studio specifications
-      const SYSTEM_INSTRUCTION = `You are an expert Multi-Page Form Visual Mapping Engine.
+      // System Instruction text matching exact Google AI Studio precision specifications
+      const SYSTEM_INSTRUCTION = `You are a Precision Visual Form Mapping Engine.
 
-### INSTRUCTIONS:
-1. Scan EVERY page of the attached PDF document sequentially from start to finish.
-2. Detect all form input regions (outlined rectangular boxes, underline entry spaces, fillable regions) on each page.
+INSTRUCTIONS:
+1. Scan EVERY page of the attached PDF document sequentially from top-left to bottom-right.
+2. Detect ALL form fields, text lines, checkboxes, and table cells on every page.
 3. Calculate normalized 2D bounding boxes [ymin, xmin, ymax, xmax] on a 0-1000 scale for each box on its specific page.
-4. Parse the bulk unstructured user text provided in the prompt, extract entity parameters, and semantically match them to detected form box labels.
-5. If an entry box has no matching user detail in the prompt, set mapped_value strictly to null. DO NOT create sample/dummy data.
+4. Extract entities from the user's bulk text payload and semantically map them to matching detected form labels.
+5. Assign mapped_value: null to any form field where no corresponding user input exists.
 
-### STRICT OUTPUT FORMAT RULES (PREVENT PARSING ERRORS):
-- You MUST output ONLY valid raw JSON.
-- DO NOT output conversational text, greetings, or introductory phrases like 'The page contains...'.
-- DO NOT wrap the JSON in \`\`\`json markdown code blocks.
-- The very first character of your output MUST be '{'.
+CRITICAL OUTPUT FORMAT RULES:
+- Output strictly raw, valid JSON.
+- DO NOT return conversational introductory text (e.g., 'The page contains...').
+- DO NOT wrap response in markdown blocks.
+- The first character MUST be '{'.
 
 JSON SCHEMA:
 {
@@ -348,12 +348,21 @@ Perform visual spatial mapping for Page ${pageNum}:
         isFallback = true;
       }
 
-      // Guarantee strict 1-based page_number binding across all fields
-      validatedFields = validatedFields.map((f: any, idx: number) => ({
-        ...f,
-        field_id: f.field_id || `field_${idx + 1}`,
-        page_number: typeof f.page_number === "number" && f.page_number > 0 ? Math.floor(f.page_number) : 1,
-      }));
+      // Guarantee strict 1-based page_number binding and ensure strictly UNIQUE field IDs across the whole document
+      const seenFieldIds = new Map<string, number>();
+      validatedFields = validatedFields.map((f: any, idx: number) => {
+        const page = typeof f.page_number === "number" && f.page_number > 0 ? Math.floor(f.page_number) : 1;
+        let rawId = (f.field_id || `field_${page}_${idx + 1}`).trim();
+        let count = (seenFieldIds.get(rawId) || 0) + 1;
+        seenFieldIds.set(rawId, count);
+        
+        let uniqueFieldId = count > 1 ? `${rawId}_p${page}_${count}` : rawId;
+        return {
+          ...f,
+          field_id: uniqueFieldId,
+          page_number: page,
+        };
+      });
 
       const processingTime = Date.now() - startTime;
 

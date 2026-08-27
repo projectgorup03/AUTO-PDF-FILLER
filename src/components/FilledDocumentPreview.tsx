@@ -53,7 +53,10 @@ export const FilledDocumentPreview: React.FC<FilledDocumentPreviewProps> = ({
   const effectiveAllFields = allFields || fields;
 
   useEffect(() => {
-    if (!documentImageUrl) return;
+    if (!documentImageUrl) {
+      setIsRendering(false);
+      return;
+    }
 
     setIsRendering(true);
     const img = new Image();
@@ -306,7 +309,15 @@ export const FilledDocumentPreview: React.FC<FilledDocumentPreviewProps> = ({
 
       {/* Canvas Rendering Area - Auto-Fit Display Area centered without clipping */}
       <div className="flex-1 overflow-hidden p-3 bg-[#050505] flex items-center justify-center">
-        {isRendering ? (
+        {!documentImageUrl ? (
+          <div className="text-center py-16 px-4 text-white/40 font-mono">
+            <FileText className="w-10 h-10 mx-auto mb-3 text-[#00F5FF]/40" />
+            <p className="text-xs font-bold uppercase text-white/80 tracking-wider">No Document Loaded</p>
+            <p className="text-[11px] text-white/40 mt-1.5 max-w-xs mx-auto leading-relaxed">
+              Upload a PDF document to generate and export filled multi-page documents.
+            </p>
+          </div>
+        ) : isRendering ? (
           <div className="flex items-center gap-2 text-white/50 text-xs">
             <RefreshCw className="w-4 h-4 animate-spin text-[#00F5FF]" />
             <span className="uppercase font-bold tracking-wider text-[10px]">
