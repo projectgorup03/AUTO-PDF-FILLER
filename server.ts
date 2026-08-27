@@ -37,6 +37,54 @@ async function startServer() {
     return aiClient;
   }
 
+  // Bulletproof JSON extractor that cleans conversational preambles, markdown wrapping, and syntax errors
+  function parseJsonSafely(raw: string): any {
+    if (!raw || typeof raw !== "string") return null;
+    let text = raw.trim();
+
+    // 1. Strip markdown code fences if present
+    text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+    // 2. Locate first '{' or '[' and matching last '}' or ']'
+    const firstBrace = text.indexOf("{");
+    const firstBracket = text.indexOf("[");
+    let startIndex = -1;
+    let isObject = false;
+
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      startIndex = firstBrace;
+      isObject = true;
+    } else if (firstBracket !== -1) {
+      startIndex = firstBracket;
+      isObject = false;
+    }
+
+    if (startIndex !== -1) {
+      const lastChar = isObject ? "}" : "]";
+      const endIndex = text.lastIndexOf(lastChar);
+      if (endIndex > startIndex) {
+        text = text.substring(startIndex, endIndex + 1);
+      }
+    }
+
+    // 3. Attempt direct parse
+    try {
+      return JSON.parse(text);
+    } catch {
+      // 4. Clean trailing commas and try once more
+      try {
+        const cleaned = text
+          .replace(/,\s*([}\]])/g, "$1") // Remove trailing commas
+          .replace(/[\u201C\u201D]/g, '"') // Replace smart quotes
+          .replace(/[\u2018\u2019]/g, "'");
+        return JSON.parse(cleaned);
+      } catch (err) {
+        console.warn("Could not parse LLM output as JSON, fallback will be used:", err);
+        return null;
+      }
+    }
+  }
+
   // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({
@@ -49,7 +97,7 @@ async function startServer() {
 
   // Spatial Document Processing & Semantic Mapping API
   // Strictly enforces Full Page Coverage (100% of pages), Page-Specific Coordinate Extraction, and 1-based Page Index Binding
-  app.post("/api/process-document", async (req, res) => {
+  const handleDocumentProcessing = async (req: express.Request, res: express.Response) => {
     const startTime = Date.now();
     try {
       const {
@@ -243,18 +291,7 @@ Perform visual spatial mapping for Page ${pageNum}:
                 },
               });
 
-              let rawJson = (response.text || "{}").trim();
-              // Clean any potential markdown wrapping
-              if (rawJson.startsWith("```")) {
-                rawJson = rawJson.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-              }
-              const firstBrace = rawJson.indexOf("{");
-              const lastBrace = rawJson.lastIndexOf("}");
-              if (firstBrace !== -1 && lastBrace !== -1) {
-                rawJson = rawJson.substring(firstBrace, lastBrace + 1);
-              }
-
-              const parsed = JSON.parse(rawJson);
+              const parsed = parseJsonSafely(response.text || "{}");
               const fieldsArray = Array.isArray(parsed?.mapped_fields)
                 ? parsed.mapped_fields
                 : Array.isArray(parsed)
@@ -365,7 +402,11 @@ Perform visual spatial mapping for Page ${pageNum}:
         fallback_notice: "Full-page spatial recovery active.",
       });
     }
-  });
+  };
+
+  // Register both endpoint paths for seamless compatibility
+  app.post("/api/process-document", handleDocumentProcessing);
+  app.post("/api/map-spatial-fields", handleDocumentProcessing);
 
   // Helper function: Extract fields for a SPECIFIC page with 100% Page Coverage & Zero-Hallucination
   function generateFallbackSpatialMappingForPage(
