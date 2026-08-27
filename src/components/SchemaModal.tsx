@@ -83,19 +83,22 @@ export const SchemaModal: React.FC<SchemaModalProps> = ({ isOpen, onClose }) => 
 
             <div className="p-3 bg-black/40 rounded-sm border border-white/10 space-y-1">
               <div className="font-bold text-[#00F5FF] text-[11px] uppercase">
-                Stage 3: JSON Output Schema
+                Stage 3: Google AI Studio JSON Output Schema
               </div>
               <pre className="p-3 bg-black rounded-sm text-[#00F5FF] font-mono text-[10px] overflow-x-auto mt-2 border border-white/10">
-{`[
-  {
-    "field_id": "p1_field_1",
-    "detected_label": "Applicant Full Name",
-    "page_number": 1,
-    "box_2d": [ymin, xmin, ymax, xmax],
-    "mapped_value": "Extracted text or null",
-    "confidence_score": 0.98
-  }
-]`}
+{`{
+  "total_pages": 2,
+  "mapped_fields": [
+    {
+      "field_id": "p1_field_1",
+      "page_number": 1,
+      "detected_label": "Applicant Full Name",
+      "box_2d": [118, 41, 165, 488],
+      "mapped_value": "Extracted text or null",
+      "confidence_score": 0.98
+    }
+  ]
+}`}
               </pre>
             </div>
           </div>

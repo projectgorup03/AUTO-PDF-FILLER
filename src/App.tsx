@@ -560,7 +560,7 @@ export default function App() {
 
               {activeRightTab === "json" && (
                 <div id="tabpanel-json" role="tabpanel" aria-labelledby="tab-json-btn" className="h-full">
-                  <RawJsonViewer fields={fields} rawJsonString={JSON.stringify(fields, null, 2)} />
+                  <RawJsonViewer fields={fields} totalPages={totalPages} />
                 </div>
               )}
 

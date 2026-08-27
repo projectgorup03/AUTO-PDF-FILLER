@@ -4,22 +4,27 @@ import { Copy, Check, Download, Code2, Terminal, CheckCircle2 } from "lucide-rea
 
 interface RawJsonViewerProps {
   fields: BoundingBoxField[];
-  rawJsonString: string;
+  rawJsonString?: string;
+  totalPages?: number;
 }
 
-export const RawJsonViewer: React.FC<RawJsonViewerProps> = ({ fields, rawJsonString }) => {
+export const RawJsonViewer: React.FC<RawJsonViewerProps> = ({ fields, totalPages = 1 }) => {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"json" | "curl">("json");
 
-  // Exact JSON output according to prompt specification
+  // Exact JSON output according to Google AI Studio prompt specification
   const formattedOutput = JSON.stringify(
-    fields.map((f) => ({
-      field_id: f.field_id,
-      detected_label: f.detected_label,
-      box_2d: f.box_2d,
-      mapped_value: f.mapped_value,
-      confidence_score: f.confidence_score,
-    })),
+    {
+      total_pages: totalPages,
+      mapped_fields: fields.map((f) => ({
+        field_id: f.field_id,
+        page_number: f.page_number || 1,
+        detected_label: f.detected_label,
+        box_2d: f.box_2d,
+        mapped_value: f.mapped_value !== undefined && f.mapped_value !== "" ? f.mapped_value : null,
+        confidence_score: typeof f.confidence_score === "number" ? f.confidence_score : 0.98,
+      })),
+    },
     null,
     2
   );

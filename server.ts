@@ -120,164 +120,178 @@ async function startServer() {
           }
         }
 
-        // Process each page sequentially to ensure 100% full-page coverage
-        for (const pageItem of pagesToProcess) {
-          const pageNum = pageItem.page_number;
-          const pagePrompt = `
-You are an expert Document Processing & Visual Spatial Mapping Engine analyzing Page ${pageNum} of a document.
+      // System Instruction text matching exact Google AI Studio specifications
+      const SYSTEM_INSTRUCTION = `You are an expert Multi-Page Form Visual Mapping Engine.
 
-### GOAL
-Perform visual layout analysis on Page ${pageNum}, identify ALL form input fields, entry boxes, checkboxes, blank underline lines, and fillable target areas on this specific page.
-Extract the freeform user details provided below, match each detected field on Page ${pageNum} to its corresponding user detail value based on semantic similarity, and output the exact normalized [0, 1000] pixel bounding box coordinates for each input box on Page ${pageNum}.
+### INSTRUCTIONS:
+1. Scan EVERY page of the attached PDF document sequentially from start to finish.
+2. Detect all form input regions (outlined rectangular boxes, underline entry spaces, fillable regions) on each page.
+3. Calculate normalized 2D bounding boxes [ymin, xmin, ymax, xmax] on a 0-1000 scale for each box on its specific page.
+4. Parse the bulk unstructured user text provided in the prompt, extract entity parameters, and semantically match them to detected form box labels.
+5. If an entry box has no matching user detail in the prompt, set mapped_value strictly to null. DO NOT create sample/dummy data.
 
-### PAGE-SPECIFIC COORDINATE EXTRACTION:
-- Extract bounding box coordinates [ymin, xmin, ymax, xmax] normalized to the specific dimensions of Page ${pageNum} on a [0, 1000] scale:
-  - ymin: Top edge coordinate (0 to 1000)
-  - xmin: Left edge coordinate (0 to 1000)
-  - ymax: Bottom edge coordinate (0 to 1000)
-  - xmax: Right edge coordinate (0 to 1000)
-  (ymin < ymax and xmin < xmax)
+### STRICT OUTPUT FORMAT RULES (PREVENT PARSING ERRORS):
+- You MUST output ONLY valid raw JSON.
+- DO NOT output conversational text, greetings, or introductory phrases like 'The page contains...'.
+- DO NOT wrap the JSON in \`\`\`json markdown code blocks.
+- The very first character of your output MUST be '{'.
 
-### PAGE INDEX BINDING:
-- Explicitly tag every detected form field entity with "page_number": ${pageNum}.
+JSON SCHEMA:
+{
+  "total_pages": <integer>,
+  "mapped_fields": [
+    {
+      "field_id": "<string>",
+      "page_number": <integer>,
+      "detected_label": "<string>",
+      "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>],
+      "mapped_value": "<string or null>",
+      "confidence_score": <float>
+    }
+  ]
+}`;
 
-### STRICT ZERO-SAMPLE DIRECTIVE:
-- NEVER generate sample, placeholder, or fake data.
-- Extract field values ONLY if explicitly stated in the user's provided text prompt below.
-- If an identified input box on Page ${pageNum} has no corresponding value in the user's input text, set its "mapped_value" strictly to null.
+      // Process each page sequentially to ensure 100% full-page coverage across Page 1 through Page N
+      for (const pageItem of pagesToProcess) {
+        const pageNum = pageItem.page_number;
+        const totalPagesNum = Math.max(totalPages || 1, pagesToProcess.length);
 
-### USER DETAILS PAYLOAD:
+        const pagePrompt = `Attached is Page ${pageNum} of ${totalPagesNum} of the document.
+
+USER INPUT TEXT (SOURCE ENTITY PAYLOAD):
 """
-${userDetailsText.trim() || "(No user details provided. Detect all form input fields on this page and set all mapped_value to null.)"}
+${userDetailsText.trim() || "(No user details provided. Detect all form input fields on Page " + pageNum + " and set all mapped_value strictly to null.)"}
 """
 
-### STAGE 1: VISUAL LAYOUT & BOUNDING BOX DETECTION (PAGE ${pageNum})
-- Thoroughly scan this page to identify every visually distinct form entry region:
-  - Blank input boxes / rectangles
-  - Underlined blank fill lines
-  - Checkboxes / radio selection squares
-  - Address lines, multi-part number boxes, signature spaces, date lines
-- Calculate normalized bounding box coordinates on [0, 1000] for each box.
-- Identify the explicit visual label adjacent to, above, or inside each box.
+Perform visual spatial mapping for Page ${pageNum}:
+1. Detect all form input regions, blank underline lines, rectangular entry boxes, and fillable fields on Page ${pageNum}.
+2. Calculate normalized 2D bounding boxes [ymin, xmin, ymax, xmax] on a 0-1000 scale for each box on this page.
+3. Semantically match user input details to detected field labels. If no matching detail exists in the user prompt for a field, set mapped_value strictly to null.
+4. Set "page_number" strictly to ${pageNum} for all fields detected on this page.
+5. Output raw JSON conforming to the schema with total_pages: ${totalPagesNum} and mapped_fields array.`;
 
-### STAGE 2: SEMANTIC MATCHING
-- Parse the user details payload.
-- Match each extracted parameter entity to its corresponding detected box label on this page.
-- If an input box has no matching user detail, set mapped_value strictly to null.
-- If the field is a checkbox and matched, map the value to "X" or "✓".
+        let pageFieldsParsed: any[] = [];
 
-### STAGE 3: OUTPUT FORMATTING
-Output a JSON array of objects strictly matching the schema:
-[
-  {
-    "field_id": "p${pageNum}_field_1",
-    "detected_label": "Applicant Full Name",
-    "page_number": ${pageNum},
-    "box_2d": [ymin, xmin, ymax, xmax],
-    "mapped_value": "Extracted text or null",
-    "confidence_score": 0.98
-  }
-]
-`;
-
-          let pageFieldsParsed: any[] = [];
-
-          if (ai && Date.now() >= quotaCooldownUntil) {
-            for (const modelName of candidateModels) {
-              try {
-                const response = await ai.models.generateContent({
-                  model: modelName,
-                  contents: {
-                    parts: [
-                      {
-                        inlineData: {
-                          data: pageItem.imageBase64,
-                          mimeType: pageItem.mimeType,
-                        },
-                      },
-                      {
-                        text: pagePrompt,
-                      },
-                    ],
-                  },
-                  config: {
-                    systemInstruction: `You are a specialized Visual Spatial Mapping Engine. Extract exact 2D bounding boxes [ymin, xmin, ymax, xmax] normalized on [0, 1000] coordinates specifically for Page ${pageNum} of the document, with page_number set strictly to ${pageNum}.`,
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          field_id: {
-                            type: Type.STRING,
-                            description: "Unique field identifier",
-                          },
-                          detected_label: {
-                            type: Type.STRING,
-                            description: "The printed text label associated with this form input area",
-                          },
-                          page_number: {
-                            type: Type.INTEGER,
-                            description: "1-based index of the page",
-                          },
-                          box_2d: {
-                            type: Type.ARRAY,
-                            items: {
-                              type: Type.INTEGER,
-                            },
-                            description: "Normalized bounding box coordinates [ymin, xmin, ymax, xmax] on a 0 to 1000 scale",
-                          },
-                          mapped_value: {
-                            type: Type.STRING,
-                            nullable: true,
-                            description: "Extracted value matching this field, or null if not provided in user text",
-                          },
-                          confidence_score: {
-                            type: Type.NUMBER,
-                            description: "Confidence score between 0.0 and 1.0",
-                          },
-                        },
-                        required: ["field_id", "detected_label", "page_number", "box_2d", "confidence_score"],
+        if (ai && Date.now() >= quotaCooldownUntil) {
+          for (const modelName of candidateModels) {
+            try {
+              const response = await ai.models.generateContent({
+                model: modelName,
+                contents: {
+                  parts: [
+                    {
+                      inlineData: {
+                        data: pageItem.imageBase64,
+                        mimeType: pageItem.mimeType,
                       },
                     },
+                    {
+                      text: pagePrompt,
+                    },
+                  ],
+                },
+                config: {
+                  systemInstruction: SYSTEM_INSTRUCTION,
+                  responseMimeType: "application/json",
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      total_pages: {
+                        type: Type.INTEGER,
+                        description: "Total number of pages analyzed",
+                      },
+                      mapped_fields: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            field_id: {
+                              type: Type.STRING,
+                              description: "Unique field identifier",
+                            },
+                            page_number: {
+                              type: Type.INTEGER,
+                              description: "1-based index of the page",
+                            },
+                            detected_label: {
+                              type: Type.STRING,
+                              description: "The printed text label associated with this form input area",
+                            },
+                            box_2d: {
+                              type: Type.ARRAY,
+                              items: {
+                                type: Type.INTEGER,
+                              },
+                              description: "Normalized bounding box coordinates [ymin, xmin, ymax, xmax] on a 0 to 1000 scale",
+                            },
+                            mapped_value: {
+                              type: Type.STRING,
+                              nullable: true,
+                              description: "Extracted value matching this field, or null if not provided in user text",
+                            },
+                            confidence_score: {
+                              type: Type.NUMBER,
+                              description: "Confidence score between 0.0 and 1.0",
+                            },
+                          },
+                          required: ["field_id", "page_number", "detected_label", "box_2d", "confidence_score"],
+                        },
+                      },
+                    },
+                    required: ["total_pages", "mapped_fields"],
                   },
+                },
+              });
+
+              let rawJson = (response.text || "{}").trim();
+              // Clean any potential markdown wrapping
+              if (rawJson.startsWith("```")) {
+                rawJson = rawJson.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+              }
+              const firstBrace = rawJson.indexOf("{");
+              const lastBrace = rawJson.lastIndexOf("}");
+              if (firstBrace !== -1 && lastBrace !== -1) {
+                rawJson = rawJson.substring(firstBrace, lastBrace + 1);
+              }
+
+              const parsed = JSON.parse(rawJson);
+              const fieldsArray = Array.isArray(parsed?.mapped_fields)
+                ? parsed.mapped_fields
+                : Array.isArray(parsed)
+                ? parsed
+                : [];
+
+              if (fieldsArray.length > 0) {
+                pageFieldsParsed = fieldsArray.map((f: any, idx: number) => {
+                  let box = Array.isArray(f.box_2d) && f.box_2d.length === 4 ? f.box_2d : [0, 0, 100, 100];
+                  let [ymin, xmin, ymax, xmax] = box.map((n: any) => Math.max(0, Math.min(1000, Number(n) || 0)));
+                  if (ymin >= ymax) ymax = Math.min(1000, ymin + 30);
+                  if (xmin >= xmax) xmax = Math.min(1000, xmin + 80);
+
+                  return {
+                    field_id: f.field_id || `p${pageNum}_field_${idx + 1}`,
+                    page_number: pageNum, // Strictly bound to 1-based page index
+                    detected_label: f.detected_label || `Field ${idx + 1}`,
+                    box_2d: [ymin, xmin, ymax, xmax],
+                    mapped_value: f.mapped_value !== undefined && f.mapped_value !== "null" && f.mapped_value !== "" ? f.mapped_value : null,
+                    confidence_score: typeof f.confidence_score === "number" ? Math.round(f.confidence_score * 100) / 100 : 0.96,
+                  };
                 });
 
-                const rawJson = response.text || "[]";
-                const parsed = JSON.parse(rawJson);
-
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  pageFieldsParsed = parsed.map((f: any, idx: number) => {
-                    let box = Array.isArray(f.box_2d) && f.box_2d.length === 4 ? f.box_2d : [0, 0, 100, 100];
-                    let [ymin, xmin, ymax, xmax] = box.map((n: any) => Math.max(0, Math.min(1000, Number(n) || 0)));
-                    if (ymin >= ymax) ymax = Math.min(1000, ymin + 30);
-                    if (xmin >= xmax) xmax = Math.min(1000, xmin + 80);
-
-                    return {
-                      field_id: f.field_id || `p${pageNum}_field_${idx + 1}`,
-                      detected_label: f.detected_label || `Field ${idx + 1}`,
-                      page_number: pageNum, // Strictly enforce 1-based page_number binding
-                      box_2d: [ymin, xmin, ymax, xmax],
-                      mapped_value: f.mapped_value !== undefined && f.mapped_value !== "null" ? f.mapped_value : null,
-                      confidence_score: typeof f.confidence_score === "number" ? Math.round(f.confidence_score * 100) / 100 : 0.96,
-                    };
-                  });
-
-                  usedModel = modelName;
-                  break;
-                }
-              } catch (pageErr: any) {
-                const errMsg = pageErr?.message || String(pageErr);
-                modelErrorNotice = errMsg;
-                if (errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED")) {
-                  // Set a 30-second cooldown so subsequent pages immediately fallback without waiting on rate limits
-                  quotaCooldownUntil = Date.now() + 30000;
-                  (global as any).__geminiQuotaCooldownUntil = quotaCooldownUntil;
-                  break;
-                }
+                usedModel = modelName;
+                break;
+              }
+            } catch (pageErr: any) {
+              const errMsg = pageErr?.message || String(pageErr);
+              modelErrorNotice = errMsg;
+              if (errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+                quotaCooldownUntil = Date.now() + 30000;
+                (global as any).__geminiQuotaCooldownUntil = quotaCooldownUntil;
+                break;
               }
             }
           }
+        }
 
           // If AI models were rate limited (429), unavailable (503), or returned empty,
           // activate High-Precision Spatial Layout Engine specifically for this page!
