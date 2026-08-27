@@ -1,0 +1,8 @@
+{
+  "name": "3rd Remix Visual Spatial Mapping Engine",
+  "description": "Visual document layout detection and spatial bounding-box mapping engine with semantic field matching.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
